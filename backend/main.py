@@ -1,28 +1,28 @@
+import sys
+import os
+
+# Root folder ko Python path me add kar rahe hain
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from ai_engine.agent import initialize_clara
-from scheduler import start_scheduler, stop_scheduler
 from routes import router
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # 1. Initialize Agent at startup
     print("[STARTUP] Initializing Clara Agent...")
-    initialize_clara()
-    
-    # 2. Start Background Scheduler (runs cycle every 15 minutes)
-    start_scheduler(interval_minutes=15)
-    
+    try:
+        initialize_clara()
+    except Exception as e:
+        print(f"[STARTUP WARNING] {e}")
     yield
-    
-    # 3. Shutdown cleanup
-    stop_scheduler()
 
 app = FastAPI(title="VisionVortex Clara Voss API", lifespan=lifespan)
 
-# Allow CORS for Frontend integration
+# Allow CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -31,7 +31,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Register API endpoints
 app.include_router(router)
 
 @app.get("/")

@@ -1,29 +1,45 @@
 from fastapi import APIRouter
-from ai_engine.agent import get_clara_snapshot
-from storage import load_saved_state
+import json
+import os
 
 router = APIRouter(prefix="/api/agent", tags=["Agent"])
 
+DB_FILE = "latest_state.json"
+
+def safe_load_state():
+    """Safely loads saved state without breaking if storage.py is different."""
+    if os.path.exists(DB_FILE):
+        try:
+            with open(DB_FILE, "r") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {
+        "state": "OBSERVING",
+        "topics": [],
+        "feed": [],
+        "memory": []
+    }
+
 @router.get("/status")
 def get_status():
-    state_data = load_saved_state()
-    # Ensures the required "state" field defaults to "OBSERVING"
+    data = safe_load_state()
     return {
-        "state": state_data.get("state", "OBSERVING"),
-        "snapshot": get_clara_snapshot()
+        "state": data.get("state", "OBSERVING"),
+        "snapshot": {}
     }
 
 @router.get("/topics")
 def get_topics():
-    state_data = load_saved_state()
-    return {"topics": state_data.get("topics", [])}
+    data = safe_load_state()
+    return {"topics": data.get("topics", [])}
 
 @router.get("/feed")
 def get_feed():
-    state_data = load_saved_state()
-    return {"feed": state_data.get("feed", [])}
+    data = safe_load_state()
+    return {"feed": data.get("feed", [])}
 
 @router.get("/memory")
 def get_memory():
-    state_data = load_saved_state()
-    return {"memory": state_data.get("memory", [])}
+    data = safe_load_state()
+    return {"memory": data.get("memory", [])}
