@@ -1,0 +1,50 @@
+{
+  "memories": [
+    {
+      "id": "memory_1",
+      "topic": "AI coding agents",
+      "entities": [
+        "GitHub Copilot",
+        "Claude Code"
+      ],
+      "main_claim": "Coding assistants are becoming workflow operators.",
+      "angle": "Autonomy is becoming more important than autocomplete.",
+      "stance": "Agents are moving from suggestion systems to action systems.",
+      "sources": [
+        "https://example.com"
+      ],
+      "post_text": "Coding assistants are becoming coding operators.",
+      "created_at": "2026-08-08T14:23:00.427386+00:00"
+    }
+  ],
+  "beliefs": [
+    {
+      "id": "belief_1",
+      "text": "AI agents become meaningful when they can take actions, not merely generate text.",
+      "status": "STABLE",
+      "strength": 0.85,
+      "updated_at": "2026-08-08T14:33:41.042921+00:00"
+    },
+    {
+      "id": "belief_2",
+      "text": "Inference economics matter more than benchmark headlines.",
+      "status": "STABLE",
+      "strength": 0.75,
+      "updated_at": "2026-08-08T14:33:41.045862+00:00"
+    },
+    {
+      "id": "belief_3",
+      "text": "Open ecosystems accelerate product experimentation.",
+      "status": "STABLE",
+      "strength": 0.7,
+      "updated_at": "2026-08-08T14:33:41.046827+00:00"
+    },
+    {
+      "id": "belief_4",
+      "text": "AI safety becomes more important as system autonomy increases.",
+      "status": "STABLE",
+      "strength": 0.9,
+      "updated_at": "2026-08-08T14:33:41.047890+00:00"
+    }
+  ]
+}
