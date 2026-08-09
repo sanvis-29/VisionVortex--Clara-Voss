@@ -30,7 +30,6 @@ load_dotenv(
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-
     print("[STARTUP] Initializing Clara Agent...")
 
     try:
@@ -38,6 +37,13 @@ async def lifespan(app: FastAPI):
         print("[STARTUP] Clara initialized.")
     except Exception as e:
         print(f"[STARTUP WARNING] {e}")
+
+    print("[STARTUP] Running initial Clara cycle...")
+
+    try:
+        job_run_clara()
+    except Exception as e:
+        print(f"[INITIAL CYCLE WARNING] {e}")
 
     print("[STARTUP] Starting autonomous scheduler...")
 
@@ -48,13 +54,10 @@ async def lifespan(app: FastAPI):
 
     yield
 
-    print("[SHUTDOWN] Stopping scheduler...")
-
     try:
         stop_scheduler()
     except Exception:
         pass
-
 
 app = FastAPI(
     title="VisionVortex Clara Voss API",
