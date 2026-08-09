@@ -289,8 +289,18 @@ export default function Home() {
 
       if (statusData) {
         setStatus(statusData);
-        setClaraState(normalizeState(statusData.state));
         setBackendConnected(true);
+
+        // Only force the visual state when backend reports
+        // an especially meaningful state.
+        const realState = normalizeState(statusData.state);
+
+        if (
+          realState === "PUBLISHING" ||
+          realState === "REFLECTING"
+        ) {
+          setClaraState(realState);
+        }
       }
 
       if (Array.isArray(topicsData?.topics)) {
@@ -330,6 +340,33 @@ export default function Home() {
 
     return () => clearInterval(interval);
   }, []);
+
+  useEffect(() => {
+    const visualCycle = [
+      "OBSERVING",
+      "ANALYZING",
+      "INTRIGUED",
+      "SKEPTICAL",
+      "REFLECTING",
+    ];
+
+    let index = 0;
+
+    const interval = setInterval(() => {
+      setClaraState((current) => {
+        // If backend explicitly says publishing,
+        // preserve that important real state.
+        if (status.state === "PUBLISHING") {
+          return "PUBLISHING";
+        }
+
+        index = (index + 1) % visualCycle.length;
+        return visualCycle[index];
+      });
+    }, 4000);
+
+    return () => clearInterval(interval);
+  }, [status.state]);
 
   /* =========================================================
      DERIVED DATA
