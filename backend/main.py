@@ -15,7 +15,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from ai_engine.agent import initialize_clara
 from routes import router
-from scheduler import start_scheduler, stop_scheduler
+from scheduler import start_scheduler, stop_scheduler, job_run_clara
 
 
 # Load root .env
