@@ -1,90 +1,69 @@
 const API_URL =
   process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
 
-export async function getClaraStatus() {
+async function fetchJson(path) {
   try {
-    const response = await fetch(`${API_URL}/api/agent/status`, {
+    const response = await fetch(`${API_URL}${path}`, {
       cache: "no-store",
     });
 
     if (!response.ok) {
-      throw new Error("Status API failed");
+      throw new Error(`${path} failed with ${response.status}`);
     }
 
     return await response.json();
   } catch (error) {
-    console.warn("Using mock Clara status:", error);
-
-    return {
-      active: true,
-      state: "ANALYZING",
-      uptime: "12d 14h",
-      discovered: 31,
-      rejected: 28,
-      published: 3,
-      currentThought:
-        "Does this development actually change how autonomous agents operate?",
-    };
+    console.warn(`[Clara API] ${path} failed:`, error);
+    return null;
   }
 }
 
-export async function getClaraFeed() {
-  try {
-    const response = await fetch(`${API_URL}/api/agent/feed`, {
-      cache: "no-store",
-    });
+export async function getClaraStatus() {
+  const data = await fetchJson("/api/agent/status");
 
-    if (!response.ok) {
-      throw new Error("Feed API failed");
-    }
-
-    return await response.json();
-  } catch (error) {
-    console.warn("Using mock Clara feed:", error);
-
+  if (!data) {
     return {
-      posts: [],
+      id: "clara_voss",
+      state: "OBSERVING",
+      active: true,
+      cycle_status: "SILENCE",
+      discovered: 0,
+      rejected: 0,
+      published: 0,
+      message: "Clara is observing the ecosystem.",
+      started_at: null,
+      finished_at: null,
     };
   }
+
+  return data;
 }
 
 export async function getClaraTopics() {
-  try {
-    const response = await fetch(`${API_URL}/api/agent/topics`, {
-      cache: "no-store",
-    });
+  const data = await fetchJson("/api/agent/topics");
 
-    if (!response.ok) {
-      throw new Error("Topics API failed");
-    }
+  return data || {
+    topics: [],
+  };
+}
 
-    return await response.json();
-  } catch (error) {
-    console.warn("Using mock Clara topics:", error);
+export async function getClaraFeed() {
+  const data = await fetchJson("/api/agent/feed");
 
-    return {
-      topics: [],
-    };
-  }
+  return data || {
+    posts: [],
+  };
 }
 
 export async function getClaraMemory() {
-  try {
-    const response = await fetch(`${API_URL}/api/agent/memory`, {
-      cache: "no-store",
-    });
+  const data = await fetchJson("/api/agent/memory");
 
-    if (!response.ok) {
-      throw new Error("Memory API failed");
-    }
-
-    return await response.json();
-  } catch (error) {
-    console.warn("Using mock Clara memory:", error);
-
-    return {
+  return (
+    data || {
       memories: [],
       beliefs: [],
-    };
-  }
+      memory_count: 0,
+      belief_count: 0,
+    }
+  );
 }

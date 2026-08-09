@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import { AnimatePresence, motion } from "framer-motion";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import {
   Home as HomeIcon,
@@ -24,6 +24,7 @@ import {
   Cpu,
   Wifi,
   Server,
+  RefreshCw,
 } from "lucide-react";
 
 import {
@@ -34,8 +35,15 @@ import {
   ResponsiveContainer,
 } from "recharts";
 
+import {
+  getClaraStatus,
+  getClaraTopics,
+  getClaraFeed,
+  getClaraMemory,
+} from "../lib/claraApi";
+
 /* =========================================================
-   MOCK DATA
+   NAVIGATION
 ========================================================= */
 
 const navItems = [
@@ -43,134 +51,11 @@ const navItems = [
   { id: "signals", label: "Signal Stream", icon: Radio },
   { id: "newsroom", label: "Newsroom", icon: Newspaper },
   { id: "published", label: "Published", icon: Send },
-  { id: "rejected", label: "Rejected", icon: XCircle },
+  { id: "rejected", label: "Not Published", icon: XCircle },
   { id: "beliefs", label: "Beliefs", icon: Brain },
   { id: "memory", label: "Memory Core", icon: Network },
   { id: "analytics", label: "Analytics", icon: Activity },
   { id: "system", label: "System Status", icon: Settings },
-];
-
-const signals = [
-  {
-    time: "18:41",
-    title: "Anthropic debuts Claude 4 with extended tool use",
-    category: "AI MODELS",
-    score: 72,
-  },
-  {
-    time: "18:37",
-    title: "OpenAI agents gain persistent browser access",
-    category: "AI AGENTS",
-    score: 89,
-    active: true,
-  },
-  {
-    time: "18:32",
-    title: "Meta open-sources Llama 4 Scout with extended context",
-    category: "OPEN SOURCE",
-    score: 64,
-  },
-  {
-    time: "18:28",
-    title: "Next-generation AI infrastructure enters testing",
-    category: "INFRASTRUCTURE",
-    score: 58,
-  },
-];
-
-const radarData = [
-  { subject: "Impact", value: 92 },
-  { subject: "Novelty", value: 84 },
-  { subject: "Relevance", value: 96 },
-  { subject: "Credibility", value: 88 },
-  { subject: "Timeliness", value: 80 },
-  { subject: "Discussion", value: 76 },
-];
-
-const beliefs = [
-  {
-    state: "STRENGTHENED",
-    symbol: "↑",
-    tone: "olive",
-    text: "Agent autonomy makes permission architecture increasingly critical.",
-  },
-  {
-    state: "STABLE",
-    symbol: "→",
-    tone: "taupe",
-    text: "Inference economics matter more than benchmark headlines.",
-  },
-  {
-    state: "CHALLENGED",
-    symbol: "↓",
-    tone: "sand",
-    text: "Closed models will maintain a persistent capability lead.",
-  },
-];
-
-const memoryNodes = [
-  { id: 1, label: "AI Agents", x: 50, y: 50, size: 19, primary: true },
-  { id: 2, label: "Agent Security", x: 24, y: 27, size: 12 },
-  { id: 3, label: "Coding Agents", x: 75, y: 25, size: 11 },
-  { id: 4, label: "Tool Protocols", x: 78, y: 68, size: 10 },
-  { id: 5, label: "Open Source", x: 27, y: 72, size: 13 },
-  { id: 6, label: "Inference Cost", x: 52, y: 83, size: 9 },
-  { id: 7, label: "Permissions", x: 49, y: 20, size: 8 },
-];
-
-const memoryLinks = [
-  [1, 2],
-  [1, 3],
-  [1, 4],
-  [1, 5],
-  [1, 7],
-  [5, 6],
-];
-
-const publishedPosts = [
-  {
-    id: "P_018",
-    time: "18:39",
-    topic: "AI AGENTS",
-    title: "Browser access changes what agent security actually means.",
-    text:
-      "AI agents are gaining permissions faster than we are learning to secure them. Once models can browse, execute and persist, the attack surface is no longer just the prompt. It is every tool the agent is allowed to touch.",
-    score: 89,
-    rationale:
-      "Selected because persistent browser access materially changes the threat model for autonomous systems.",
-  },
-  {
-    id: "P_017",
-    time: "15:12",
-    topic: "OPEN SOURCE",
-    title: "The interesting part of open models is no longer the benchmark.",
-    text:
-      "The real advantage is deployment freedom. Lower switching costs, cheaper experimentation and infrastructure ownership may matter more than a few points on a leaderboard.",
-    score: 84,
-    rationale:
-      "Published because the release changes deployment economics for smaller AI teams.",
-  },
-];
-
-const rejectedStories = [
-  {
-    title: "GPT-X improves benchmark performance by 1.8%",
-    score: 52,
-    reason:
-      "Incremental benchmark movement without meaningful product, accessibility, cost or capability implications.",
-  },
-  {
-    title: "AI startup raises another large funding round",
-    score: 46,
-    reason:
-      "High attention, but no demonstrated technical or ecosystem consequence yet.",
-  },
-  {
-    title: "Minor chatbot UI redesign becomes viral",
-    score: 31,
-    reason:
-      "Strong discussion volume but almost no relevance to Clara's editorial domain.",
-  },
 ];
 
 /* =========================================================
@@ -206,7 +91,7 @@ const claraThoughts = {
     "Does this evidence strengthen or challenge what I already believe?",
 };
 
-const claraStates = [
+const validStates = [
   "OBSERVING",
   "ANALYZING",
   "INTRIGUED",
@@ -216,26 +101,354 @@ const claraStates = [
 ];
 
 /* =========================================================
+   FALLBACKS
+========================================================= */
+
+const fallbackStatus = {
+  id: "clara_voss",
+  state: "OBSERVING",
+  active: true,
+  cycle_status: "SILENCE",
+  discovered: 0,
+  rejected: 0,
+  published: 0,
+  message: "Waiting for Clara's next editorial cycle.",
+  started_at: null,
+  finished_at: null,
+};
+
+const fallbackBeliefs = [
+  {
+    id: "belief_1",
+    text:
+      "AI agents become meaningful when they can take actions, not merely generate text.",
+    status: "STABLE",
+    strength: 0.85,
+  },
+  {
+    id: "belief_2",
+    text: "Inference economics matter more than benchmark headlines.",
+    status: "STABLE",
+    strength: 0.75,
+  },
+];
+
+/* =========================================================
+   HELPERS
+========================================================= */
+
+function normalizeState(state) {
+  const value = String(state || "OBSERVING").toUpperCase();
+
+  if (validStates.includes(value)) {
+    return value;
+  }
+
+  return "OBSERVING";
+}
+
+function formatTime(value) {
+  if (!value) return "—";
+
+  try {
+    return new Intl.DateTimeFormat("en-IN", {
+      hour: "2-digit",
+      minute: "2-digit",
+    }).format(new Date(value));
+  } catch {
+    return "—";
+  }
+}
+
+function getSignalCategory(topic) {
+  const title = `${topic?.title || ""} ${topic?.summary || ""}`.toLowerCase();
+
+  if (title.includes("agent")) return "AI AGENTS";
+  if (title.includes("open source") || title.includes("open-source"))
+    return "OPEN SOURCE";
+  if (title.includes("security") || title.includes("attack"))
+    return "AI SECURITY";
+  if (title.includes("model") || title.includes("deepseek"))
+    return "AI MODELS";
+  if (title.includes("inference")) return "INFRASTRUCTURE";
+
+  return "TECH SIGNAL";
+}
+
+function beliefPresentation(status) {
+  const normalized = String(status || "STABLE").toUpperCase();
+
+  if (normalized === "STRENGTHENED") {
+    return {
+      symbol: "↑",
+      tone: "olive",
+    };
+  }
+
+  if (normalized === "CHALLENGED") {
+    return {
+      symbol: "↓",
+      tone: "sand",
+    };
+  }
+
+  return {
+    symbol: "→",
+    tone: "taupe",
+  };
+}
+
+function buildMemoryGraph(memories) {
+  const base = [];
+
+  const positions = [
+    { x: 50, y: 50, size: 19 },
+    { x: 25, y: 26, size: 12 },
+    { x: 75, y: 25, size: 11 },
+    { x: 78, y: 68, size: 10 },
+    { x: 27, y: 72, size: 12 },
+    { x: 52, y: 83, size: 9 },
+    { x: 49, y: 18, size: 8 },
+  ];
+
+  const labels = [];
+
+  memories.forEach((memory) => {
+    if (memory?.topic) labels.push(memory.topic);
+
+    (memory?.entities || []).forEach((entity) => {
+      labels.push(entity);
+    });
+  });
+
+  const unique = [...new Set(labels)].slice(0, 7);
+
+  if (unique.length === 0) {
+    unique.push("Editorial Memory");
+  }
+
+  unique.forEach((label, index) => {
+    const position = positions[index] || positions[positions.length - 1];
+
+    base.push({
+      id: index + 1,
+      label,
+      x: position.x,
+      y: position.y,
+      size: position.size,
+      primary: index === 0,
+    });
+  });
+
+  const links = [];
+
+  for (let index = 1; index < base.length; index++) {
+    links.push([1, index + 1]);
+  }
+
+  return {
+    nodes: base,
+    links,
+  };
+}
+
+/* =========================================================
    PAGE
 ========================================================= */
 
 export default function Home() {
+  const [status, setStatus] = useState(fallbackStatus);
+  const [topics, setTopics] = useState([]);
+  const [posts, setPosts] = useState([]);
+  const [memories, setMemories] = useState([]);
+  const [beliefs, setBeliefs] = useState(fallbackBeliefs);
+
   const [claraState, setClaraState] = useState("OBSERVING");
   const [mouse, setMouse] = useState({ x: 700, y: 400 });
   const [activeSection, setActiveSection] = useState("overview");
 
+  const [loading, setLoading] = useState(true);
+  const [backendConnected, setBackendConnected] = useState(false);
+  const [lastRefresh, setLastRefresh] = useState(null);
+
   const scrollContainer = useRef(null);
 
+  /* =========================================================
+     BACKEND FETCH
+  ========================================================= */
+
+  async function loadClaraData() {
+    try {
+      const [statusData, topicsData, feedData, memoryData] =
+        await Promise.all([
+          getClaraStatus(),
+          getClaraTopics(),
+          getClaraFeed(),
+          getClaraMemory(),
+        ]);
+
+      if (statusData) {
+        setStatus(statusData);
+        setClaraState(normalizeState(statusData.state));
+        setBackendConnected(true);
+      }
+
+      if (Array.isArray(topicsData?.topics)) {
+        setTopics(topicsData.topics);
+      }
+
+      if (Array.isArray(feedData?.posts)) {
+        setPosts(feedData.posts);
+      }
+
+      if (Array.isArray(memoryData?.memories)) {
+        setMemories(memoryData.memories);
+      }
+
+      if (
+        Array.isArray(memoryData?.beliefs) &&
+        memoryData.beliefs.length > 0
+      ) {
+        setBeliefs(memoryData.beliefs);
+      }
+
+      setLastRefresh(new Date());
+    } catch (error) {
+      console.error("Clara frontend integration error:", error);
+      setBackendConnected(false);
+    } finally {
+      setLoading(false);
+    }
+  }
+
   useEffect(() => {
+    loadClaraData();
+
     const interval = setInterval(() => {
-      setClaraState((current) => {
-        const index = claraStates.indexOf(current);
-        return claraStates[(index + 1) % claraStates.length];
-      });
-    }, 5000);
+      loadClaraData();
+    }, 10000);
 
     return () => clearInterval(interval);
   }, []);
+
+  /* =========================================================
+     DERIVED DATA
+  ========================================================= */
+
+  const topCandidate = topics[0] || null;
+
+  const radarData = useMemo(() => {
+    const breakdown = topCandidate?.breakdown || {};
+
+    return [
+      {
+        subject: "Impact",
+        value: breakdown.consequence ?? 0,
+      },
+      {
+        subject: "Novelty",
+        value: breakdown.novelty ?? 0,
+      },
+      {
+        subject: "Relevance",
+        value: breakdown.relevance ?? 0,
+      },
+      {
+        subject: "Credibility",
+        value: breakdown.credibility ?? 0,
+      },
+      {
+        subject: "Timeliness",
+        value: breakdown.timeliness ?? 0,
+      },
+      {
+        subject: "Discussion",
+        value: breakdown.discussion_potential ?? 0,
+      },
+    ];
+  }, [topCandidate]);
+
+  const signals = useMemo(() => {
+    return topics.slice(0, 5).map((topic, index) => ({
+      id: topic.external_id || `topic-${index}`,
+      time: formatTime(topic.published_at),
+      title: topic.title,
+      category: getSignalCategory(topic),
+      score: topic.score ?? 0,
+      decision: topic.decision,
+      active: index === 0,
+      source: topic.source,
+      reason: topic.reason,
+    }));
+  }, [topics]);
+
+  const rejectedStories = useMemo(() => {
+    return topics
+      .filter((topic) => topic.decision !== "PUBLISH")
+      .map((topic) => ({
+        title: topic.title,
+        score: topic.score,
+        decision: topic.decision,
+        reason: topic.reason,
+      }));
+  }, [topics]);
+
+  const visualBeliefs = useMemo(() => {
+    return beliefs.map((belief) => {
+      const presentation = beliefPresentation(belief.status);
+
+      return {
+        ...belief,
+        state: belief.status || "STABLE",
+        symbol: presentation.symbol,
+        tone: presentation.tone,
+      };
+    });
+  }, [beliefs]);
+
+  const memoryGraph = useMemo(
+    () => buildMemoryGraph(memories),
+    [memories]
+  );
+
+  const actualRejects = topics.filter(
+    (topic) => topic.decision === "REJECT"
+  ).length;
+
+  const watchCount = topics.filter(
+    (topic) => topic.decision === "WATCH"
+  ).length;
+
+  const avgSalience =
+    topics.length > 0
+      ? (
+          topics.reduce(
+            (sum, item) => sum + Number(item.score || 0),
+            0
+          ) / topics.length
+        ).toFixed(1)
+      : "0.0";
+
+  const rejectionRate =
+    status.discovered > 0
+      ? `${Math.round(
+          ((status.discovered - Number(status.published || 0)) /
+            status.discovered) *
+            100
+        )}%`
+      : "0%";
+
+  const salience = Number(topCandidate?.score || 0);
+
+  const hypePenalty =
+    topCandidate?.breakdown?.hype_penalty ?? 0;
+
+  const repetitionPenalty =
+    topCandidate?.breakdown?.repetition_penalty ?? 0;
+
+  /* =========================================================
+     INTERACTION
+  ========================================================= */
 
   function handleMouseMove(event) {
     setMouse({
@@ -262,7 +475,9 @@ export default function Home() {
       onMouseMove={handleMouseMove}
       className="relative min-h-screen overflow-hidden bg-[#F3ECE3] text-[#342A24]"
     >
-      {/* BACKGROUND */}
+      {/* =====================================================
+          BACKGROUND
+      ===================================================== */}
 
       <div className="pointer-events-none fixed inset-0 overflow-hidden">
         <motion.div
@@ -298,13 +513,18 @@ export default function Home() {
       </div>
 
       <div className="relative grid min-h-screen grid-cols-[230px_1fr]">
-        {/* SIDEBAR */}
+        {/* =====================================================
+            SIDEBAR
+        ===================================================== */}
 
         <aside className="z-30 h-screen border-r border-[#5F5045]/10 bg-[#FAF6F0]/82 p-5 backdrop-blur-2xl">
           <div className="mb-8">
             <div className="flex items-center gap-3">
               <motion.div
-                whileHover={{ rotate: 8, scale: 1.06 }}
+                whileHover={{
+                  rotate: 8,
+                  scale: 1.06,
+                }}
                 className="flex h-9 w-9 items-center justify-center rounded-xl bg-[#3E342D] text-[#F7F2EC]"
               >
                 <Sparkles size={16} />
@@ -329,28 +549,42 @@ export default function Home() {
           </div>
 
           <nav className="space-y-1">
-            {navItems.map(({ id, label, icon: Icon }) => {
-              const active = activeSection === id;
+            {navItems.map(
+              ({ id, label, icon: Icon }) => {
+                const active =
+                  activeSection === id;
 
-              return (
-                <motion.button
-                  whileHover={{ x: active ? 0 : 4 }}
-                  whileTap={{ scale: 0.98 }}
-                  key={id}
-                  onClick={() => goToSection(id)}
-                  className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-[11px] transition ${
-                    active
-                      ? "bg-[#473A32] text-[#FFFDF9] shadow-[0_8px_20px_rgba(60,48,40,.12)]"
-                      : "text-[#594A40] hover:bg-[#E9DED3]"
-                  }`}
-                >
-                  <Icon size={14} strokeWidth={1.6} />
+                return (
+                  <motion.button
+                    whileHover={{
+                      x: active ? 0 : 4,
+                    }}
+                    whileTap={{
+                      scale: 0.98,
+                    }}
+                    key={id}
+                    onClick={() =>
+                      goToSection(id)
+                    }
+                    className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-[11px] transition ${
+                      active
+                        ? "bg-[#473A32] text-[#FFFDF9] shadow-[0_8px_20px_rgba(60,48,40,.12)]"
+                        : "text-[#594A40] hover:bg-[#E9DED3]"
+                    }`}
+                  >
+                    <Icon
+                      size={14}
+                      strokeWidth={1.6}
+                    />
 
-                  {label}
-                </motion.button>
-              );
-            })}
+                    {label}
+                  </motion.button>
+                );
+              }
+            )}
           </nav>
+
+          {/* CORE */}
 
           <div className="mt-6 rounded-[24px] border border-[#766558]/10 bg-white/40 p-4 backdrop-blur-xl">
             <div className="flex items-center justify-between">
@@ -359,8 +593,21 @@ export default function Home() {
               </p>
 
               <span className="relative flex h-2 w-2">
-                <span className="absolute h-full w-full animate-ping rounded-full bg-[#75856A] opacity-40" />
-                <span className="relative h-2 w-2 rounded-full bg-[#75856A]" />
+                <span
+                  className={`absolute h-full w-full animate-ping rounded-full ${
+                    backendConnected
+                      ? "bg-[#75856A]"
+                      : "bg-[#A89A8C]"
+                  } opacity-40`}
+                />
+
+                <span
+                  className={`relative h-2 w-2 rounded-full ${
+                    backendConnected
+                      ? "bg-[#75856A]"
+                      : "bg-[#A89A8C]"
+                  }`}
+                />
               </span>
             </div>
 
@@ -387,8 +634,16 @@ export default function Home() {
 
               <motion.div
                 animate={{
-                  scale: [0.8, 1.1, 0.8],
-                  opacity: [0.35, 0.9, 0.35],
+                  scale: [
+                    0.8,
+                    1.1,
+                    0.8,
+                  ],
+                  opacity: [
+                    0.35,
+                    0.9,
+                    0.35,
+                  ],
                 }}
                 transition={{
                   duration: 2.5,
@@ -406,19 +661,32 @@ export default function Home() {
           </div>
         </aside>
 
-        {/* MAIN */}
+        {/* =====================================================
+            MAIN
+        ===================================================== */}
 
         <section
           ref={scrollContainer}
           className="h-screen overflow-y-auto scroll-smooth p-6 xl:p-7"
         >
           <div className="mx-auto max-w-[1550px]">
-            {/* OVERVIEW */}
+            {/* =================================================
+                OVERVIEW
+            ================================================= */}
 
-            <section id="overview" className="scroll-mt-6">
+            <section
+              id="overview"
+              className="scroll-mt-6"
+            >
               <motion.div
-                initial={{ opacity: 0, y: -10 }}
-                animate={{ opacity: 1, y: 0 }}
+                initial={{
+                  opacity: 0,
+                  y: -10,
+                }}
+                animate={{
+                  opacity: 1,
+                  y: 0,
+                }}
                 className="mb-5 flex items-center justify-between"
               >
                 <div>
@@ -429,28 +697,68 @@ export default function Home() {
                     </span>
 
                     <p className="text-[10px] tracking-[0.22em] text-[#706157]">
-                      SYSTEM ACTIVE
+                      {backendConnected
+                        ? "SYSTEM ACTIVE"
+                        : "LOCAL VISUAL MODE"}
                     </p>
                   </div>
 
                   <p className="mt-1.5 text-xs text-[#7B6C61]">
-                    Clara is operating independently.
+                    {loading
+                      ? "Synchronizing with Clara..."
+                      : status.message ||
+                        "Clara is operating independently."}
                   </p>
                 </div>
 
-                <div className="flex gap-8 rounded-2xl border border-white/50 bg-[#FBF8F4]/75 px-6 py-3 backdrop-blur-xl">
-                  <Metric label="UPTIME" value="12d 14h" />
-                  <Metric label="SIGNALS" value="59" />
-                  <Metric label="PUBLISHED" value="3" />
+                <div className="flex items-center gap-6 rounded-2xl border border-white/50 bg-[#FBF8F4]/75 px-6 py-3 backdrop-blur-xl">
+                  <Metric
+                    label="DISCOVERED"
+                    value={
+                      status.discovered ?? 0
+                    }
+                  />
+
+                  <Metric
+                    label="NOT PUBLISHED"
+                    value={
+                      status.rejected ?? 0
+                    }
+                  />
+
+                  <Metric
+                    label="PUBLISHED"
+                    value={
+                      status.published ?? 0
+                    }
+                  />
+
+                  <motion.button
+                    whileHover={{
+                      rotate: 20,
+                    }}
+                    onClick={loadClaraData}
+                    className="text-[#77685E]"
+                  >
+                    <RefreshCw size={14} />
+                  </motion.button>
                 </div>
               </motion.div>
 
               <div className="grid gap-4 xl:grid-cols-[1.35fr_1fr_0.95fr]">
-                {/* CLARA */}
+                {/* =============================================
+                    CLARA HERO
+                ============================================= */}
 
                 <motion.div
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
+                  initial={{
+                    opacity: 0,
+                    y: 20,
+                  }}
+                  animate={{
+                    opacity: 1,
+                    y: 0,
+                  }}
                   className="group relative min-h-[510px] overflow-hidden rounded-[32px] border border-white/50 bg-[#D9CBBB] shadow-[0_20px_65px_rgba(53,42,34,.08)]"
                 >
                   <AnimatePresence mode="wait">
@@ -459,23 +767,32 @@ export default function Home() {
                       initial={{
                         opacity: 0,
                         scale: 1.035,
-                        filter: "blur(7px)",
+                        filter:
+                          "blur(7px)",
                       }}
                       animate={{
                         opacity: 1,
                         scale: 1,
-                        filter: "blur(0px)",
+                        filter:
+                          "blur(0px)",
                       }}
                       exit={{
                         opacity: 0,
                         scale: 0.985,
-                        filter: "blur(5px)",
+                        filter:
+                          "blur(5px)",
                       }}
-                      transition={{ duration: 0.85 }}
+                      transition={{
+                        duration: 0.85,
+                      }}
                       className="absolute inset-0"
                     >
                       <Image
-                        src={claraImages[claraState]}
+                        src={
+                          claraImages[
+                            claraState
+                          ]
+                        }
                         alt={`Clara Voss ${claraState}`}
                         fill
                         priority
@@ -490,7 +807,13 @@ export default function Home() {
                   <div className="absolute inset-0 bg-gradient-to-t from-[#302820]/18 via-transparent to-transparent" />
 
                   <motion.div
-                    animate={{ top: ["8%", "92%", "8%"] }}
+                    animate={{
+                      top: [
+                        "8%",
+                        "92%",
+                        "8%",
+                      ],
+                    }}
                     transition={{
                       duration: 8,
                       repeat: Infinity,
@@ -511,7 +834,8 @@ export default function Home() {
                     </h2>
 
                     <p className="mt-4 text-[9px] uppercase tracking-[0.2em] text-[#69594F]">
-                      Autonomous AI Systems Analyst
+                      Autonomous AI Systems
+                      Analyst
                     </p>
 
                     <div className="mt-11">
@@ -524,10 +848,21 @@ export default function Home() {
 
                         <AnimatePresence mode="wait">
                           <motion.p
-                            key={claraState}
-                            initial={{ opacity: 0, x: -7 }}
-                            animate={{ opacity: 1, x: 0 }}
-                            exit={{ opacity: 0, x: 7 }}
+                            key={
+                              claraState
+                            }
+                            initial={{
+                              opacity: 0,
+                              x: -7,
+                            }}
+                            animate={{
+                              opacity: 1,
+                              x: 0,
+                            }}
+                            exit={{
+                              opacity: 0,
+                              x: 7,
+                            }}
                             className="text-lg font-medium tracking-[0.16em]"
                           >
                             {claraState}
@@ -537,7 +872,12 @@ export default function Home() {
 
                       <div className="mt-3 h-px w-[160px] overflow-hidden bg-[#756458]/20">
                         <motion.div
-                          animate={{ x: ["-100%", "100%"] }}
+                          animate={{
+                            x: [
+                              "-100%",
+                              "100%",
+                            ],
+                          }}
                           transition={{
                             duration: 1.8,
                             repeat: Infinity,
@@ -555,13 +895,30 @@ export default function Home() {
 
                       <AnimatePresence mode="wait">
                         <motion.p
-                          key={claraState}
-                          initial={{ opacity: 0, y: 8 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          exit={{ opacity: 0, y: -8 }}
+                          key={
+                            claraState
+                          }
+                          initial={{
+                            opacity: 0,
+                            y: 8,
+                          }}
+                          animate={{
+                            opacity: 1,
+                            y: 0,
+                          }}
+                          exit={{
+                            opacity: 0,
+                            y: -8,
+                          }}
                           className="mt-3 font-serif text-[17px] italic leading-6 text-[#443830]"
                         >
-                          “{claraThoughts[claraState]}”
+                          “
+                          {
+                            claraThoughts[
+                              claraState
+                            ]
+                          }
+                          ”
                         </motion.p>
                       </AnimatePresence>
                     </div>
@@ -571,62 +928,86 @@ export default function Home() {
                     <ScanSearch size={12} />
 
                     <span className="text-[8px] tracking-[0.18em]">
-                      THINKING
+                      {status.cycle_status ||
+                        "OBSERVING"}
                     </span>
-
-                    <motion.span
-                      animate={{ opacity: [0.2, 1, 0.2] }}
-                      transition={{
-                        duration: 1.3,
-                        repeat: Infinity,
-                      }}
-                    >
-                      •••
-                    </motion.span>
                   </div>
 
                   <div className="absolute bottom-6 left-8 flex items-center gap-2 rounded-full border border-white/30 bg-[#FAF5EE]/60 px-4 py-2 backdrop-blur-xl">
                     <Clock3 size={12} />
 
                     <span className="text-[8px] tracking-[0.17em]">
-                      AUTONOMOUS CYCLE ACTIVE
+                      LAST CYCLE ·{" "}
+                      {formatTime(
+                        status.finished_at
+                      )}
                     </span>
                   </div>
                 </motion.div>
 
-                {/* SIGNALS */}
+                {/* =============================================
+                    SIGNAL STREAM
+                ============================================= */}
 
                 <Panel>
-                  <div id="signals" className="scroll-mt-7">
+                  <div
+                    id="signals"
+                    className="scroll-mt-7"
+                  >
                     <SectionHeading
                       title="LIVE SIGNAL STREAM"
-                      subtitle="Clara's incoming attention"
+                      subtitle="Real candidates discovered by Clara"
                     />
 
                     <SignalVisualizer />
 
                     <div className="space-y-2">
-                      {signals.map((signal, index) => (
-                        <SignalCard
-                          key={signal.time}
-                          signal={signal}
-                          index={index}
-                        />
-                      ))}
+                      {signals.length >
+                      0 ? (
+                        signals.map(
+                          (
+                            signal,
+                            index
+                          ) => (
+                            <SignalCard
+                              key={
+                                signal.id
+                              }
+                              signal={
+                                signal
+                              }
+                              index={
+                                index
+                              }
+                            />
+                          )
+                        )
+                      ) : (
+                        <EmptyState text="Waiting for the next discovery cycle." />
+                      )}
                     </div>
                   </div>
                 </Panel>
 
-                {/* EDITORIAL */}
+                {/* =============================================
+                    EDITORIAL BRAIN
+                ============================================= */}
 
                 <Panel>
                   <SectionHeading
                     title="EDITORIAL BRAIN"
-                    subtitle="Multi-dimensional judgment"
+                    subtitle={
+                      topCandidate
+                        ? "Current highest-ranked candidate"
+                        : "Waiting for editorial evaluation"
+                    }
                   />
 
                   <div className="mt-2 h-[230px]">
-                    <ResponsiveContainer width="100%" height="100%">
+                    <ResponsiveContainer
+                      width="100%"
+                      height="100%"
+                    >
                       <RadarChart
                         cx="50%"
                         cy="52%"
@@ -635,7 +1016,9 @@ export default function Home() {
                       >
                         <PolarGrid
                           stroke="#B4A699"
-                          strokeOpacity={0.35}
+                          strokeOpacity={
+                            0.35
+                          }
                         />
 
                         <PolarAngleAxis
@@ -650,9 +1033,15 @@ export default function Home() {
                           dataKey="value"
                           stroke="#57483D"
                           fill="#887666"
-                          fillOpacity={0.22}
-                          strokeWidth={1.6}
-                          animationDuration={1300}
+                          fillOpacity={
+                            0.22
+                          }
+                          strokeWidth={
+                            1.6
+                          }
+                          animationDuration={
+                            1300
+                          }
                         />
                       </RadarChart>
                     </ResponsiveContainer>
@@ -665,7 +1054,11 @@ export default function Home() {
                       </p>
 
                       <div className="mt-1 flex items-end">
-                        <p className="font-serif text-4xl">89</p>
+                        <p className="font-serif text-4xl">
+                          {salience.toFixed(
+                            1
+                          )}
+                        </p>
 
                         <span className="mb-1 ml-1 text-[9px] text-[#8A7A6D]">
                           /100
@@ -674,103 +1067,205 @@ export default function Home() {
                     </div>
 
                     <div className="text-right text-[8px] leading-5 text-[#7C6C61]">
-                      <p>HYPE −6</p>
-                      <p>REPETITION −3</p>
+                      <p>
+                        HYPE −
+                        {hypePenalty}
+                      </p>
+
+                      <p>
+                        REPETITION −
+                        {repetitionPenalty}
+                      </p>
                     </div>
                   </div>
 
-                  <motion.button
-                    whileHover={{ scale: 1.02 }}
-                    whileTap={{ scale: 0.98 }}
-                    className="mt-4 w-full rounded-xl bg-[#3E342D] px-5 py-3 text-[9px] tracking-[0.2em] text-[#FFFDF9]"
+                  <div
+                    className={`mt-4 w-full rounded-xl px-5 py-3 text-center text-[9px] tracking-[0.2em] ${
+                      topCandidate?.decision ===
+                      "PUBLISH"
+                        ? "bg-[#3E342D] text-[#FFFDF9]"
+                        : "bg-[#EAE1D8] text-[#65564A]"
+                    }`}
                   >
-                    SIGNAL CONFIRMED · PUBLISH
-                  </motion.button>
+                    {topCandidate
+                      ? `${topCandidate.decision} · ${topCandidate.reason}`
+                      : "AWAITING SIGNAL"}
+                  </div>
                 </Panel>
               </div>
             </section>
 
-            {/* NEWSROOM */}
+            {/* =================================================
+                NEWSROOM
+            ================================================= */}
 
-            <section id="newsroom" className="scroll-mt-7 pt-5">
+            <section
+              id="newsroom"
+              className="scroll-mt-7 pt-5"
+            >
               <Panel>
                 <SectionHeading
                   title="NEWSROOM"
                   subtitle="What Clara considered, compared and decided"
                 />
 
-                <div className="mt-5 grid gap-3 md:grid-cols-3">
-                  <BigStat label="DISCOVERED" value="31" />
-                  <BigStat label="REJECTED" value="28" />
-                  <BigStat label="PUBLISHED" value="3" />
+                <div className="mt-5 grid gap-3 md:grid-cols-4">
+                  <BigStat
+                    label="DISCOVERED"
+                    value={
+                      status.discovered ??
+                      0
+                    }
+                  />
+
+                  <BigStat
+                    label="WATCH"
+                    value={watchCount}
+                  />
+
+                  <BigStat
+                    label="REJECTED"
+                    value={actualRejects}
+                  />
+
+                  <BigStat
+                    label="PUBLISHED"
+                    value={
+                      status.published ??
+                      0
+                    }
+                  />
                 </div>
 
                 <div className="mt-5 rounded-2xl bg-[#E8DED4]/50 p-5">
                   <p className="text-[8px] tracking-[0.18em] text-[#77685E]">
-                    LAST 60 MINUTES
+                    EDITORIAL DISTRIBUTION
                   </p>
 
                   <div className="mt-4 flex h-[70px] items-end justify-between gap-2">
-                    {[
-                      10, 35, 20, 48, 28, 52, 17, 40, 30, 55, 21, 44, 31,
-                      60, 24,
-                    ].map((height, index) => (
-                      <motion.div
-                        key={index}
-                        initial={{ height: 2 }}
-                        animate={{ height }}
-                        transition={{
-                          duration: 0.8,
-                          delay: index * 0.04,
-                        }}
-                        className="w-full rounded-t-full bg-[#6D5D51]/25"
-                      />
-                    ))}
+                    {topics.length > 0
+                      ? topics.map(
+                          (
+                            topic,
+                            index
+                          ) => (
+                            <motion.div
+                              key={
+                                topic.external_id ||
+                                index
+                              }
+                              initial={{
+                                height: 2,
+                              }}
+                              animate={{
+                                height:
+                                  Math.max(
+                                    8,
+                                    Number(
+                                      topic.score ||
+                                        0
+                                    ) *
+                                      0.7
+                                  ),
+                              }}
+                              transition={{
+                                duration:
+                                  0.8,
+                                delay:
+                                  index *
+                                  0.05,
+                              }}
+                              className="w-full rounded-t-full bg-[#6D5D51]/25"
+                            />
+                          )
+                        )
+                      : null}
                   </div>
                 </div>
               </Panel>
             </section>
 
-            {/* PUBLISHED */}
+            {/* =================================================
+                PUBLISHED
+            ================================================= */}
 
-            <section id="published" className="scroll-mt-7 pt-5">
+            <section
+              id="published"
+              className="scroll-mt-7 pt-5"
+            >
               <Panel>
                 <SectionHeading
                   title="PUBLISHED"
                   subtitle="Stories Clara independently decided were worth saying"
                 />
 
-                <div className="mt-5 grid gap-4 xl:grid-cols-2">
-                  {publishedPosts.map((post) => (
-                    <PublishedCard key={post.id} post={post} />
-                  ))}
-                </div>
+                {posts.length > 0 ? (
+                  <div className="mt-5 grid gap-4 xl:grid-cols-2">
+                    {posts.map(
+                      (post, index) => (
+                        <PublishedCard
+                          key={
+                            post.id ||
+                            index
+                          }
+                          post={post}
+                        />
+                      )
+                    )}
+                  </div>
+                ) : (
+                  <SilenceCard
+                    message={
+                      status.message
+                    }
+                  />
+                )}
               </Panel>
             </section>
 
-            {/* REJECTED */}
+            {/* =================================================
+                REJECTED / WATCH
+            ================================================= */}
 
-            <section id="rejected" className="scroll-mt-7 pt-5">
+            <section
+              id="rejected"
+              className="scroll-mt-7 pt-5"
+            >
               <Panel>
                 <SectionHeading
-                  title="REJECTED FROM THE NEWSROOM"
+                  title="NOT PUBLISHED"
                   subtitle="Silence is also a decision"
                 />
 
                 <div className="mt-5 grid gap-3 xl:grid-cols-3">
-                  {rejectedStories.map((story) => (
-                    <RejectedCard
-                      key={story.title}
-                      story={story}
-                    />
-                  ))}
+                  {rejectedStories.length >
+                  0 ? (
+                    rejectedStories.map(
+                      (
+                        story,
+                        index
+                      ) => (
+                        <RejectedCard
+                          key={`${story.title}-${index}`}
+                          story={story}
+                        />
+                      )
+                    )
+                  ) : (
+                    <EmptyState text="No rejected stories stored yet." />
+                  )}
                 </div>
               </Panel>
             </section>
 
-            {/* BELIEFS */}
+            {/* =================================================
+                BELIEFS
+            ================================================= */}
 
-            <section id="beliefs" className="scroll-mt-7 pt-5">
+            <section
+              id="beliefs"
+              className="scroll-mt-7 pt-5"
+            >
               <Panel>
                 <div className="flex items-center justify-between">
                   <SectionHeading
@@ -778,42 +1273,72 @@ export default function Home() {
                     subtitle="Persistent beliefs evolving with evidence"
                   />
 
-                  <Brain size={18} strokeWidth={1.4} />
+                  <Brain
+                    size={18}
+                    strokeWidth={1.4}
+                  />
                 </div>
 
-                <div className="mt-5 grid gap-3 md:grid-cols-3">
-                  {beliefs.map((belief) => (
-                    <BeliefCard
-                      key={belief.text}
-                      belief={belief}
-                    />
-                  ))}
+                <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                  {visualBeliefs.map(
+                    (belief) => (
+                      <BeliefCard
+                        key={
+                          belief.id ||
+                          belief.text
+                        }
+                        belief={
+                          belief
+                        }
+                      />
+                    )
+                  )}
                 </div>
               </Panel>
             </section>
 
-            {/* MEMORY */}
+            {/* =================================================
+                MEMORY
+            ================================================= */}
 
-            <section id="memory" className="scroll-mt-7 pt-5">
+            <section
+              id="memory"
+              className="scroll-mt-7 pt-5"
+            >
               <Panel>
                 <div className="flex items-center justify-between">
                   <SectionHeading
                     title="MEMORY CORE"
-                    subtitle="Semantic relationships across Clara's editorial history"
+                    subtitle={`${memories.length} persisted editorial memories`}
                   />
 
-                  <Network size={18} strokeWidth={1.4} />
+                  <Network
+                    size={18}
+                    strokeWidth={1.4}
+                  />
                 </div>
 
                 <div className="mt-5">
-                  <MemoryCore />
+                  <MemoryCore
+                    nodes={
+                      memoryGraph.nodes
+                    }
+                    links={
+                      memoryGraph.links
+                    }
+                  />
                 </div>
               </Panel>
             </section>
 
-            {/* ANALYTICS */}
+            {/* =================================================
+                ANALYTICS
+            ================================================= */}
 
-            <section id="analytics" className="scroll-mt-7 pt-5">
+            <section
+              id="analytics"
+              className="scroll-mt-7 pt-5"
+            >
               <Panel>
                 <SectionHeading
                   title="EDITORIAL ANALYTICS"
@@ -823,34 +1348,43 @@ export default function Home() {
                 <div className="mt-5 grid gap-3 md:grid-cols-4">
                   <AnalyticsCard
                     label="Average Salience"
-                    value="74.8"
-                    detail="+6.2 this cycle"
+                    value={avgSalience}
+                    detail={`${topics.length} ranked candidates`}
                   />
 
                   <AnalyticsCard
-                    label="Rejection Rate"
-                    value="90%"
+                    label="Non-Publish Rate"
+                    value={
+                      rejectionRate
+                    }
                     detail="Intentional selectivity"
                   />
 
                   <AnalyticsCard
-                    label="Memory Matches"
-                    value="11"
-                    detail="Across 31 signals"
+                    label="Memory Store"
+                    value={
+                      memories.length
+                    }
+                    detail={`${visualBeliefs.length} persistent beliefs`}
                   />
 
                   <AnalyticsCard
-                    label="Hype Filtered"
-                    value="17"
-                    detail="Since last cycle"
+                    label="Watch Queue"
+                    value={watchCount}
+                    detail="Signals below publish threshold"
                   />
                 </div>
               </Panel>
             </section>
 
-            {/* SYSTEM */}
+            {/* =================================================
+                SYSTEM
+            ================================================= */}
 
-            <section id="system" className="scroll-mt-7 py-5">
+            <section
+              id="system"
+              className="scroll-mt-7 py-5"
+            >
               <Panel>
                 <SectionHeading
                   title="SYSTEM STATUS"
@@ -861,29 +1395,48 @@ export default function Home() {
                   <StatusCard
                     icon={Cpu}
                     label="Editorial Engine"
-                    status="ONLINE"
-                    detail="Cycle healthy"
+                    status={
+                      status.active
+                        ? "ONLINE"
+                        : "OFFLINE"
+                    }
+                    detail={
+                      status.cycle_status ||
+                      "Waiting"
+                    }
                   />
 
                   <StatusCard
                     icon={Database}
                     label="Memory Store"
                     status="CONNECTED"
-                    detail="7 clusters active"
+                    detail={`${memories.length} memories`}
                   />
 
                   <StatusCard
                     icon={Wifi}
                     label="Live Sources"
-                    status="STREAMING"
-                    detail="4 source classes"
+                    status={
+                      backendConnected
+                        ? "STREAMING"
+                        : "DISCONNECTED"
+                    }
+                    detail={`${status.discovered || 0} latest discoveries`}
                   />
 
                   <StatusCard
                     icon={Server}
-                    label="Autonomy Worker"
-                    status="RUNNING"
-                    detail="Next cycle in 03:18"
+                    label="Backend API"
+                    status={
+                      backendConnected
+                        ? "CONNECTED"
+                        : "LOCAL FALLBACK"
+                    }
+                    detail={
+                      lastRefresh
+                        ? `Synced ${lastRefresh.toLocaleTimeString()}`
+                        : "Not synced"
+                    }
                   />
                 </div>
 
@@ -894,12 +1447,18 @@ export default function Home() {
                     </p>
 
                     <p className="mt-1 text-xs text-[#4A3D34]">
-                      Clara continues operating without a human prompt.
+                      GET requests only
+                      observe saved state.
+                      Generation remains
+                      independent of the
+                      frontend.
                     </p>
                   </div>
 
                   <div className="flex items-center gap-2 text-[8px] tracking-[0.16em] text-[#66725C]">
-                    <CheckCircle2 size={14} />
+                    <CheckCircle2
+                      size={14}
+                    />
                     VERIFIED
                   </div>
                 </div>
@@ -919,11 +1478,20 @@ export default function Home() {
 function Panel({ children }) {
   return (
     <motion.div
-      initial={{ opacity: 0, y: 15 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.55 }}
+      initial={{
+        opacity: 0,
+        y: 15,
+      }}
+      animate={{
+        opacity: 1,
+        y: 0,
+      }}
+      transition={{
+        duration: 0.55,
+      }}
       whileHover={{
-        borderColor: "rgba(92,76,64,.16)",
+        borderColor:
+          "rgba(92,76,64,.16)",
       }}
       className="rounded-[28px] border border-[#66564A]/10 bg-[#FBF7F2]/82 p-5 shadow-[0_15px_45px_rgba(54,43,35,.045)] backdrop-blur-xl"
     >
@@ -932,7 +1500,10 @@ function Panel({ children }) {
   );
 }
 
-function SectionHeading({ title, subtitle }) {
+function SectionHeading({
+  title,
+  subtitle,
+}) {
   return (
     <div>
       <p className="text-[10px] font-semibold tracking-[0.16em]">
@@ -965,33 +1536,55 @@ function SignalVisualizer() {
     <div className="relative mt-5 h-12 overflow-hidden">
       <div className="absolute top-1/2 h-px w-full bg-[#77685D]/10" />
 
-      {[15, 35, 50, 68, 82].map((position, index) => (
-        <motion.div
-          key={position}
-          animate={{
-            height: [5, 18 + index * 3, 8, 25 - index * 2, 5],
-          }}
-          transition={{
-            duration: 2 + index * 0.3,
-            repeat: Infinity,
-          }}
-          style={{
-            left: `${position}%`,
-          }}
-          className="absolute bottom-1/2 w-px bg-[#66564A]/35"
-        />
-      ))}
+      {[15, 35, 50, 68, 82].map(
+        (position, index) => (
+          <motion.div
+            key={position}
+            animate={{
+              height: [
+                5,
+                18 + index * 3,
+                8,
+                25 - index * 2,
+                5,
+              ],
+            }}
+            transition={{
+              duration:
+                2 + index * 0.3,
+              repeat: Infinity,
+            }}
+            style={{
+              left: `${position}%`,
+            }}
+            className="absolute bottom-1/2 w-px bg-[#66564A]/35"
+          />
+        )
+      )}
     </div>
   );
 }
 
-function SignalCard({ signal, index }) {
+function SignalCard({
+  signal,
+  index,
+}) {
+  const watch =
+    signal.decision === "WATCH";
+
   return (
     <motion.div
-      initial={{ opacity: 0, x: 20 }}
-      animate={{ opacity: 1, x: 0 }}
+      initial={{
+        opacity: 0,
+        x: 20,
+      }}
+      animate={{
+        opacity: 1,
+        x: 0,
+      }}
       transition={{
-        delay: 0.2 + index * 0.08,
+        delay:
+          0.15 + index * 0.06,
       }}
       whileHover={{
         x: 5,
@@ -1006,7 +1599,11 @@ function SignalCard({ signal, index }) {
       {signal.active && (
         <motion.div
           animate={{
-            opacity: [0.2, 0.6, 0.2],
+            opacity: [
+              0.2,
+              0.6,
+              0.2,
+            ],
           }}
           transition={{
             duration: 1.8,
@@ -1026,14 +1623,26 @@ function SignalCard({ signal, index }) {
             {signal.title}
           </p>
 
-          <div className="mt-2 flex items-center justify-between">
+          <div className="mt-2 flex items-center justify-between gap-3">
             <span className="text-[7px] tracking-[0.16em] text-[#877568]">
               {signal.category}
             </span>
 
-            <span className="font-serif text-lg">
-              {signal.score}
-            </span>
+            <div className="flex items-center gap-2">
+              <span
+                className={`text-[7px] tracking-[0.12em] ${
+                  watch
+                    ? "text-[#84765F]"
+                    : "text-[#76685D]"
+                }`}
+              >
+                {signal.decision}
+              </span>
+
+              <span className="font-serif text-lg">
+                {signal.score}
+              </span>
+            </div>
           </div>
         </div>
       </div>
@@ -1041,7 +1650,10 @@ function SignalCard({ signal, index }) {
   );
 }
 
-function BigStat({ label, value }) {
+function BigStat({
+  label,
+  value,
+}) {
   return (
     <motion.div
       whileHover={{ y: -4 }}
@@ -1071,17 +1683,16 @@ function PublishedCard({ post }) {
           </span>
 
           <span className="rounded-full bg-[#EEE7DF] px-2.5 py-1 text-[7px] tracking-[0.15em] text-[#796B60]">
-            {post.topic}
+            {post.topic ||
+              "AI / TECHNOLOGY"}
           </span>
         </div>
-
-        <p className="font-serif text-lg">
-          {post.score}
-        </p>
       </div>
 
       <h3 className="mt-5 font-serif text-xl leading-6">
-        {post.title}
+        {post.angle ||
+          post.mainClaim ||
+          "Clara's latest editorial decision"}
       </h3>
 
       <p className="mt-4 text-[11px] leading-5 text-[#65584E]">
@@ -1090,7 +1701,7 @@ function PublishedCard({ post }) {
 
       <div className="mt-5 rounded-xl bg-[#EFE7DE]/55 p-4">
         <p className="text-[7px] tracking-[0.18em] text-[#89796D]">
-          CLARA'S RATIONALE
+          CLARA&apos;S RATIONALE
         </p>
 
         <p className="mt-2 text-[10px] leading-5 text-[#62554B]">
@@ -1100,14 +1711,54 @@ function PublishedCard({ post }) {
 
       <div className="mt-4 flex items-center justify-between">
         <span className="text-[7px] text-[#8A7C71]">
-          {post.id} · {post.time}
+          {formatTime(
+            post.createdAt
+          )}
         </span>
 
-        <button className="flex items-center gap-1 text-[7px] tracking-[0.14em] text-[#65564A]">
-          SOURCE
-          <ExternalLink size={10} />
-        </button>
+        {post.sources?.[0] && (
+          <a
+            href={post.sources[0]}
+            target="_blank"
+            rel="noreferrer"
+            className="flex items-center gap-1 text-[7px] tracking-[0.14em] text-[#65564A]"
+          >
+            SOURCE
+            <ExternalLink
+              size={10}
+            />
+          </a>
+        )}
       </div>
+    </motion.div>
+  );
+}
+
+function SilenceCard({ message }) {
+  return (
+    <motion.div
+      initial={{
+        opacity: 0,
+        scale: 0.98,
+      }}
+      animate={{
+        opacity: 1,
+        scale: 1,
+      }}
+      className="mt-5 rounded-[24px] border border-[#6B5A4D]/10 bg-[#F1E9E0]/65 p-7"
+    >
+      <p className="text-[8px] tracking-[0.22em] text-[#8A796D]">
+        NO PUBLICATION
+      </p>
+
+      <h3 className="mt-4 font-serif text-2xl">
+        Silence was the decision.
+      </h3>
+
+      <p className="mt-3 max-w-2xl text-[11px] leading-6 text-[#6D5E53]">
+        {message ||
+          "Clara reviewed the available signals and found none sufficiently consequential to justify publication."}
+      </p>
     </motion.div>
   );
 }
@@ -1115,14 +1766,12 @@ function PublishedCard({ post }) {
 function RejectedCard({ story }) {
   return (
     <motion.div
-      whileHover={{
-        y: -4,
-      }}
+      whileHover={{ y: -4 }}
       className="rounded-[22px] border border-[#6B5A4D]/10 bg-white/28 p-4"
     >
       <div className="flex items-center justify-between">
         <span className="text-[7px] tracking-[0.16em] text-[#7A6C62]">
-          REJECTED
+          {story.decision}
         </span>
 
         <span className="font-serif text-xl">
@@ -1141,7 +1790,10 @@ function RejectedCard({ story }) {
       <div className="mt-4 h-px bg-[#76695E]/10" />
 
       <p className="mt-3 text-[7px] tracking-[0.16em] text-[#89796D]">
-        BELOW EDITORIAL THRESHOLD
+        {story.decision ===
+        "WATCH"
+          ? "MONITORING · BELOW PUBLISH THRESHOLD"
+          : "BELOW EDITORIAL THRESHOLD"}
       </p>
     </motion.div>
   );
@@ -1149,9 +1801,12 @@ function RejectedCard({ story }) {
 
 function BeliefCard({ belief }) {
   const tones = {
-    olive: "bg-[#EFF1EA] text-[#66725C]",
-    taupe: "bg-[#F0ECE7] text-[#675F59]",
-    sand: "bg-[#F1ECE4] text-[#75685D]",
+    olive:
+      "bg-[#EFF1EA] text-[#66725C]",
+    taupe:
+      "bg-[#F0ECE7] text-[#675F59]",
+    sand:
+      "bg-[#F1ECE4] text-[#75685D]",
   };
 
   return (
@@ -1164,20 +1819,38 @@ function BeliefCard({ belief }) {
     >
       <span
         className={`inline-flex rounded-full px-2.5 py-1 text-[7px] tracking-[0.15em] ${
-          tones[belief.tone]
+          tones[belief.tone] ||
+          tones.taupe
         }`}
       >
-        {belief.symbol} {belief.state}
+        {belief.symbol}{" "}
+        {belief.state}
       </span>
 
       <p className="mt-3 font-serif text-[15px] leading-5 text-[#433830]">
         {belief.text}
       </p>
+
+      {belief.strength !==
+        undefined && (
+        <p className="mt-3 text-[7px] tracking-[0.14em] text-[#8A7B70]">
+          CONFIDENCE ·{" "}
+          {Math.round(
+            Number(
+              belief.strength
+            ) * 100
+          )}
+          %
+        </p>
+      )}
     </motion.div>
   );
 }
 
-function MemoryCore() {
+function MemoryCore({
+  nodes,
+  links,
+}) {
   return (
     <div className="relative h-[390px] overflow-hidden rounded-[24px] border border-[#6B5A4D]/10 bg-[#F7F1EA]/75">
       <div
@@ -1185,42 +1858,62 @@ function MemoryCore() {
         style={{
           backgroundImage:
             "radial-gradient(circle at 1px 1px, #5B4B40 1px, transparent 0)",
-          backgroundSize: "24px 24px",
+          backgroundSize:
+            "24px 24px",
         }}
       />
 
       <div className="absolute left-1/2 top-1/2 h-[260px] w-[260px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-[#DCCDBD]/25 blur-[80px]" />
 
       <svg className="absolute inset-0 h-full w-full">
-        {memoryLinks.map(([a, b], index) => {
-          const start = memoryNodes.find((node) => node.id === a);
-          const end = memoryNodes.find((node) => node.id === b);
+        {links.map(
+          ([a, b], index) => {
+            const start =
+              nodes.find(
+                (node) =>
+                  node.id === a
+              );
 
-          return (
-            <motion.line
-              key={`${a}-${b}`}
-              x1={`${start.x}%`}
-              y1={`${start.y}%`}
-              x2={`${end.x}%`}
-              y2={`${end.y}%`}
-              stroke="#76675B"
-              strokeWidth="1"
-              strokeOpacity="0.27"
-              initial={{
-                pathLength: 0,
-                opacity: 0,
-              }}
-              animate={{
-                pathLength: 1,
-                opacity: 1,
-              }}
-              transition={{
-                duration: 1.2,
-                delay: index * 0.1,
-              }}
-            />
-          );
-        })}
+            const end =
+              nodes.find(
+                (node) =>
+                  node.id === b
+              );
+
+            if (
+              !start ||
+              !end
+            ) {
+              return null;
+            }
+
+            return (
+              <motion.line
+                key={`${a}-${b}`}
+                x1={`${start.x}%`}
+                y1={`${start.y}%`}
+                x2={`${end.x}%`}
+                y2={`${end.y}%`}
+                stroke="#76675B"
+                strokeWidth="1"
+                strokeOpacity="0.27"
+                initial={{
+                  pathLength: 0,
+                  opacity: 0,
+                }}
+                animate={{
+                  pathLength: 1,
+                  opacity: 1,
+                }}
+                transition={{
+                  duration: 1.2,
+                  delay:
+                    index * 0.1,
+                }}
+              />
+            );
+          }
+        )}
       </svg>
 
       <div className="absolute left-5 top-5">
@@ -1229,79 +1922,81 @@ function MemoryCore() {
         </p>
 
         <p className="mt-1 text-[8px] text-[#8A7B6F]">
-          Previous arguments remain connected
+          Previous arguments remain
+          connected
         </p>
       </div>
 
-      {memoryNodes.map((node, index) => (
-        <motion.div
-          key={node.id}
-          initial={{
-            opacity: 0,
-            scale: 0,
-          }}
-          animate={{
-            opacity: 1,
-            scale: 1,
-          }}
-          transition={{
-            delay: 0.2 + index * 0.1,
-            type: "spring",
-            stiffness: 130,
-          }}
-          whileHover={{
-            scale: 1.14,
-          }}
-          className="absolute -translate-x-1/2 -translate-y-1/2 cursor-pointer"
-          style={{
-            left: `${node.x}%`,
-            top: `${node.y}%`,
-          }}
-        >
+      {nodes.map(
+        (node, index) => (
           <motion.div
+            key={node.id}
+            initial={{
+              opacity: 0,
+              scale: 0,
+            }}
             animate={{
-              boxShadow: [
-                "0 0 0 rgba(75,61,51,0)",
-                node.primary
-                  ? "0 0 42px rgba(75,61,51,.20)"
-                  : "0 0 24px rgba(75,61,51,.12)",
-                "0 0 0 rgba(75,61,51,0)",
-              ],
+              opacity: 1,
+              scale: 1,
             }}
             transition={{
-              duration: 3,
-              repeat: Infinity,
-              delay: index * 0.3,
+              delay:
+                0.2 +
+                index * 0.1,
+              type: "spring",
+              stiffness: 130,
             }}
-            className={`flex items-center justify-center rounded-full border backdrop-blur-xl ${
-              node.primary
-                ? "border-[#51433A]/20 bg-[#E7DDD3]/92"
-                : "border-[#6B5A4D]/12 bg-[#FBF7F2]/90"
-            }`}
+            whileHover={{
+              scale: 1.14,
+            }}
+            className="absolute -translate-x-1/2 -translate-y-1/2 cursor-pointer"
             style={{
-              width: `${node.size * 4}px`,
-              height: `${node.size * 4}px`,
+              left: `${node.x}%`,
+              top: `${node.y}%`,
             }}
           >
-            <span className="px-2 text-center text-[8px] leading-3 tracking-[0.07em] text-[#51443B]">
-              {node.label}
-            </span>
+            <motion.div
+              animate={{
+                boxShadow: [
+                  "0 0 0 rgba(75,61,51,0)",
+                  node.primary
+                    ? "0 0 42px rgba(75,61,51,.20)"
+                    : "0 0 24px rgba(75,61,51,.12)",
+                  "0 0 0 rgba(75,61,51,0)",
+                ],
+              }}
+              transition={{
+                duration: 3,
+                repeat: Infinity,
+                delay:
+                  index * 0.3,
+              }}
+              className={`flex items-center justify-center rounded-full border backdrop-blur-xl ${
+                node.primary
+                  ? "border-[#51433A]/20 bg-[#E7DDD3]/92"
+                  : "border-[#6B5A4D]/12 bg-[#FBF7F2]/90"
+              }`}
+              style={{
+                width: `${node.size * 4}px`,
+                height: `${node.size * 4}px`,
+              }}
+            >
+              <span className="px-2 text-center text-[8px] leading-3 tracking-[0.07em] text-[#51443B]">
+                {node.label}
+              </span>
+            </motion.div>
           </motion.div>
-        </motion.div>
-      ))}
-
-      <div className="absolute bottom-5 right-5 flex items-center gap-2 rounded-full border border-[#66564A]/10 bg-[#FBF7F2]/65 px-3 py-2 backdrop-blur-xl">
-        <span className="h-1.5 w-1.5 rounded-full bg-[#75856A]" />
-
-        <span className="text-[7px] tracking-[0.16em] text-[#75665B]">
-          7 ACTIVE CLUSTERS
-        </span>
-      </div>
+        )
+      )}
     </div>
   );
 }
 
-function AnalyticsCard({ label, value, detail }) {
+function AnalyticsCard({
+  label,
+  value,
+  detail,
+}) {
   return (
     <motion.div
       whileHover={{ y: -4 }}
@@ -1334,7 +2029,10 @@ function StatusCard({
       className="rounded-2xl border border-[#6B5A4D]/10 bg-white/30 p-4"
     >
       <div className="flex items-center justify-between">
-        <Icon size={16} strokeWidth={1.5} />
+        <Icon
+          size={16}
+          strokeWidth={1.5}
+        />
 
         <span className="h-1.5 w-1.5 rounded-full bg-[#75856A]" />
       </div>
@@ -1351,5 +2049,13 @@ function StatusCard({
         {detail}
       </p>
     </motion.div>
+  );
+}
+
+function EmptyState({ text }) {
+  return (
+    <div className="rounded-2xl border border-[#6B5A4D]/10 bg-white/25 p-5 text-[10px] text-[#7A6C61]">
+      {text}
+    </div>
   );
 }
