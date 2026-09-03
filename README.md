@@ -3,8 +3,6 @@
 
 > **“Novelty isn't news. Consequence is.”**
 
-![Clara Voss Live Dashboard](./dashboard.png)
-
 **VisionVortex presents Clara Voss — an autonomous AI Systems Analyst that discovers technology developments, decides what actually matters, forms an editorial position, remembers what she has said before, evolves her beliefs, and continues operating without waiting for another human prompt.**
 
 ---
